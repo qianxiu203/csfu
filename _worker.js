@@ -2,7 +2,6 @@ import { connect } from 'cloudflare:sockets';
 
 const UUID = ""; 
 const DEFAULT_PROXY_IP = ""; 
-const NODE_DEFAULT_PATH = "/static/js/app.89f2d3e4.min.js"; 
 
 const FLOW_LIMIT=2097152,IDLE_MARK=15000,HOLD_SPAN=8000,STALL_CAP=12,RETRY_BOUND=24;
 const formatId=(a,i)=>{const h=[...a.slice(i,i+16)].map(n=>n.toString(16).padStart(2,'0')).join('');return[h.slice(0,8),h.slice(8,12),h.slice(12,16),h.slice(16,20),h.slice(20,32)].join('-')};
@@ -41,6 +40,9 @@ const handle = (ws, proxyConfig, uuid) => {
   const pool = new Collector();
   let s, w, r, inf, fst = true, rx = 0, stl = 0, cnt = 0, lact = Date.now(), con = false, rd = false, wt = false, tm = {}, pd = [], pb = 0, scr = 1.0, lck = Date.now(), lrx = 0, md = 'buf', asz = 0, tp = [], st = { t: 0, c: 0, ts: Date.now() };
   
+  // 严格清理 UUID，防止环境变量带入隐形空格导致直接崩溃
+  const _safe_uuid = String(uuid).trim().toLowerCase();
+
   const upd = sz => {
     st.t += sz; st.c++; asz = asz * 0.9 + sz * 0.1; const n = Date.now();
     if (n - st.ts > 1000) { const rt = st.t; tp.push(rt); if (tp.length > 5) tp.shift(); st.t = 0; st.ts = n; const av = tp.reduce((a, b) => a + b, 0) / tp.length; if (st.c >= 20) { if (av > 2e7 && asz > 16384) md = 'dir'; else if (av < 1e7 || asz < 8192) md = 'buf'; else md = 'adp' } }
@@ -69,7 +71,46 @@ const handle = (ws, proxyConfig, uuid) => {
   const csk = () => { rd = false; wt = false; try { w?.releaseLock(); r?.releaseLock(); s?.close() } catch { } }; 
   const cln = () => { Object.values(tm).forEach(clearInterval); csk(); while (pd.length) pool.free(pd.shift()); pb = 0; st = { t: 0, c: 0, ts: Date.now() }; md = 'buf'; asz = 0; tp = []; pool.reset() };
   
-  ws.addEventListener('message', async e => { try { if (fst) { fst = false; const b = new Uint8Array(e.data); if (formatId(b, 1).toLowerCase() !== uuid.toLowerCase()) throw 0; ws.send(new Uint8Array([0, 0])); const { host, port, payload } = parseTarget(b); inf = { host, port }; con = true; if (payload.length) { const z = pool.alloc(payload.length); z.set(payload); pd.push(z); pb += z.length } stT(); est() } else { lact = Date.now(); if (pb > FLOW_LIMIT * 2) return; const z = pool.alloc(e.data.byteLength); z.set(new Uint8Array(e.data)); pd.push(z); pb += z.length } } catch { cln(); ws.close(1006) } });
+  ws.addEventListener('message', async e => { 
+    try { 
+        if (fst) { 
+            fst = false; 
+            const b = new Uint8Array(e.data); 
+            // 防护1：包长度越界防御
+            if (b.length < 24) throw 0; 
+            // 防护2：UUID 严格容错匹配
+            if (formatId(b, 1).toLowerCase() !== _safe_uuid) throw 0; 
+            
+            ws.send(new Uint8Array([0, 0])); 
+            const { host, port, payload } = parseTarget(b); 
+            inf = { host, port }; 
+            con = true; 
+            
+            // 防护3：禁止 0 字节写入崩溃
+            if (payload && payload.length > 0) { 
+                const z = pool.alloc(payload.length); 
+                z.set(payload); 
+                pd.push(z); 
+                pb += z.length;
+            } 
+            stT(); 
+            est(); 
+        } else { 
+            lact = Date.now(); 
+            if (pb > FLOW_LIMIT * 2) return; 
+            // 防护4：流数据空包拦截
+            if (e.data && e.data.byteLength > 0) {
+                const z = pool.alloc(e.data.byteLength); 
+                z.set(new Uint8Array(e.data)); 
+                pd.push(z); 
+                pb += z.length;
+            }
+        } 
+    } catch { 
+        cln(); 
+        ws.close(1006);
+    } 
+  });
   ws.addEventListener('close', cln); ws.addEventListener('error', cln)
 };
 
