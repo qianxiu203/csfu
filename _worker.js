@@ -1,15 +1,9 @@
 import { connect } from 'cloudflare:sockets';
 
-// =============================================================================
-// 🟢 用户配置区域 (子账号: 仅处理流量)
-// =============================================================================
-const UUID = ""; // 必须与主账号的 UUID 或 KEY 保持一致
+const UUID = ""; 
 const DEFAULT_PROXY_IP = ""; 
-const NODE_DEFAULT_PATH = "/api/v1"; 
+const NODE_DEFAULT_PATH = "/static/js/app.89f2d3e4.min.js"; 
 
-// =============================================================================
-// ⚡️ 核心代理逻辑区
-// =============================================================================
 const FLOW_LIMIT=2097152,IDLE_MARK=15000,HOLD_SPAN=8000,STALL_CAP=12,RETRY_BOUND=24;
 const formatId=(a,i)=>{const h=[...a.slice(i,i+16)].map(n=>n.toString(16).padStart(2,'0')).join('');return[h.slice(0,8),h.slice(8,12),h.slice(12,16),h.slice(16,20),h.slice(20,32)].join('-')};
 const parseTarget=b=>{const o=18+b[17]+1;let c=o;const p=b[c]*256+b[c+1];c+=2;const t=b[c];c+=1;let l=0,h='';switch(t){case 1:l=4;h=[...b.slice(c,c+l)].join('.');c+=l;break;case 2:l=b[c];c+=1;h=new TextDecoder().decode(b.slice(c,c+l));c+=l;break;case 3:l=16;const v=b.slice(c,c+16);h=`[${Array.from({length:8},(_,i)=>((v[i*2]*256+v[i*2+1]).toString(16))).join(':')}]`;c+=l;break;default:throw new Error('Addr type error');}return{host:h,port:p,payload:b.slice(c)}};
@@ -79,18 +73,14 @@ const handle = (ws, proxyConfig, uuid) => {
   ws.addEventListener('close', cln); ws.addEventListener('error', cln)
 };
 
-// =============================================================================
-// 🟢 主入口 (仅限 WebSocket)
-// =============================================================================
 export default {
   async fetch(r, env, ctx) {
     try {
       const url = new URL(r.url);
       
-      // 非 WebSocket 请求伪装处理
       if (r.headers.get('Upgrade') !== 'websocket') {
           const t = new URL(r.url);
-          t.hostname = 'example.com';
+          t.hostname = 'www.w3.org';
           t.protocol = 'https:';
           const h = new Headers(r.headers);
           h.set('Host', t.hostname);
@@ -101,7 +91,6 @@ export default {
       const _PROXY_IP_RAW = env.PROXYIP || env.DEFAULT_PROXY_IP || DEFAULT_PROXY_IP;
       const _PROXY_IP = _PROXY_IP_RAW ? _PROXY_IP_RAW.split(/[,\n]/)[0].trim() : "";
 
-      // 提取客户端传递的 ProxyIP
       let finalProxyConfig = null;
       const remoteProxyIP = url.searchParams.get('proxyip'); 
 
@@ -113,7 +102,6 @@ export default {
           try { finalProxyConfig = await parseIP(_PROXY_IP); } catch (e) {}
       }
 
-      // 建立连接
       const { 0: c, 1: s } = new WebSocketPair();
       s.accept();
       handle(s, finalProxyConfig, _UUID);
